@@ -68,6 +68,11 @@ body {
   background: rgba(255,255,255,0.2);
 }
 
+.search-input.ready-to-search {
+  border-color: rgba(255,255,255,0.8);
+  background: rgba(255,255,255,0.25);
+}
+
 .search-btn {
   background: rgba(255,255,255,0.2);
   color: white;
