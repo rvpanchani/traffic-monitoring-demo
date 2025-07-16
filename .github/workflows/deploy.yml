@@ -16,3 +16,5 @@ jobs:
       - run: git config --global user.email "github-actions[bot]@users.noreply.github.com" 
       - run: git config --global user.name "github-actions[bot]"
       - run: npx gh-pages -d dist
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
