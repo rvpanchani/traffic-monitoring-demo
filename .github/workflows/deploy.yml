@@ -13,4 +13,6 @@ jobs:
       - run: npm install
       - run: echo "VITE_TOMTOM_API_KEY=${{ secrets.TOMTOM_API_KEY }}" >> .env
       - run: npm run build
+      - run: git config --global user.email "github-actions[bot]@users.noreply.github.com" 
+      - run: git config --global user.name "github-actions[bot]"
       - run: npx gh-pages -d dist
