@@ -1,5 +1,61 @@
 import './style.css'
 
+// Constants
+const CONSTANTS = {
+  MAP: {
+    DEFAULT_ZOOM: 13,
+    SEARCH_RADIUS: 0.045, // Roughly 5km in degrees
+    RASTER_OPACITY: {
+      TRAFFIC_FLOW: 0.6,
+      TRAFFIC_INCIDENTS: 0.7,
+      SIMPLE_TRAFFIC: 0.5
+    }
+  },
+  TIMEOUTS: {
+    TRAFFIC_LAYER_RETRY: 3000,
+    LAYER_VERIFICATION: 1000
+  },
+  API: {
+    GEOCODING_LIMIT: 1,
+    TILE_SIZE: 256
+  },
+  UI: {
+    SEARCH_DEBOUNCE: 300,
+    STATUS_TIMEOUT: 5000
+  }
+};
+
+// Utility functions
+const utils = {
+  // Sanitize HTML to prevent XSS attacks
+  sanitizeHtml: (str) => {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  },
+  
+  // Validate and sanitize search input
+  sanitizeSearchInput: (input) => {
+    if (typeof input !== 'string') return '';
+    return input.trim().replace(/[<>'"&]/g, '').substring(0, 100);
+  },
+  
+  // Validate coordinates
+  isValidCoordinate: (lon, lat) => {
+    return typeof lon === 'number' && typeof lat === 'number' &&
+           lon >= -180 && lon <= 180 && lat >= -90 && lat <= 90;
+  },
+  
+  // Debounce function to limit API calls
+  debounce: (func, delay) => {
+    let timeoutId;
+    return (...args) => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => func.apply(null, args), delay);
+    };
+  }
+};
+
 // Configuration
 const CONFIG = {
   // Default location: Sinhgad Road area coordinates (Pune, Maharashtra, India)
@@ -32,13 +88,32 @@ class TrafficIncidentsApp {
     this.incidents = [];
     this.markers = [];
     this.searchResults = [];
+    this.isDestroyed = false;
+    
+    // Create debounced search function
+    this.debouncedSearch = utils.debounce(() => this.handleLocationSearch(), CONSTANTS.UI.SEARCH_DEBOUNCE);
+    
     this.init();
   }
 
   async init() {
-    this.setupEventListeners();
-    await this.initializeMap();
-    await this.loadTrafficIncidents();
+    try {
+      this.setupEventListeners();
+      await this.initializeMap();
+      await this.loadTrafficIncidents();
+    } catch (error) {
+      console.error('Failed to initialize application:', error);
+      this.updateStatus(`Initialization failed: ${error.message}`, 'error');
+    }
+  }
+
+  destroy() {
+    this.isDestroyed = true;
+    this.clearMarkers();
+    if (this.map) {
+      this.map.remove();
+      this.map = null;
+    }
   }
 
   setupEventListeners() {
@@ -48,23 +123,39 @@ class TrafficIncidentsApp {
     const toggleTrafficFlowBtn = document.getElementById('toggle-traffic-flow');
     const toggleTrafficIncidentsBtn = document.getElementById('toggle-traffic-incidents');
 
-    refreshBtn.addEventListener('click', () => this.loadTrafficIncidents());
-    searchBtn.addEventListener('click', () => this.handleLocationSearch());
+    if (refreshBtn) refreshBtn.addEventListener('click', () => this.loadTrafficIncidents());
+    if (searchBtn) searchBtn.addEventListener('click', () => this.handleLocationSearch());
     
-    // Allow search on Enter key
-    searchInput.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') {
-        this.handleLocationSearch();
-      }
-    });
+    // Allow search on Enter key with debouncing
+    if (searchInput) {
+      searchInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          this.debouncedSearch();
+        }
+      });
+      
+      // Also debounce on input to provide real-time feedback
+      searchInput.addEventListener('input', () => {
+        const value = searchInput.value.trim();
+        if (value.length > 2) {
+          // Visual feedback that search is ready
+          searchInput.classList.add('ready-to-search');
+        } else {
+          searchInput.classList.remove('ready-to-search');
+        }
+      });
+    }
 
     // Traffic layer controls
-    toggleTrafficFlowBtn.addEventListener('click', () => this.toggleTrafficFlow());
-    toggleTrafficIncidentsBtn.addEventListener('click', () => this.toggleTrafficIncidents());
+    if (toggleTrafficFlowBtn) toggleTrafficFlowBtn.addEventListener('click', () => this.toggleTrafficFlow());
+    if (toggleTrafficIncidentsBtn) toggleTrafficIncidentsBtn.addEventListener('click', () => this.toggleTrafficIncidents());
   }
 
   async initializeMap() {
     try {
+      if (this.isDestroyed) return;
+      
       this.updateStatus('Initializing map...', 'loading');
       
       // Check if TomTom is available
@@ -72,12 +163,19 @@ class TrafficIncidentsApp {
         throw new Error('TomTom Maps SDK not loaded');
       }
 
+      // Validate API key
+      if (!CONFIG.tomtomApiKey || CONFIG.tomtomApiKey === 'YOUR_TOMTOM_API_KEY_HERE') {
+        console.warn('TomTom API key not configured, using demo mode');
+        this.showDemoMode();
+        return;
+      }
+
       // Initialize TomTom map with reliable configuration
       this.map = tt.map({
         key: CONFIG.tomtomApiKey,
         container: 'map',
         center: [CONFIG.currentLocation.center.lon, CONFIG.currentLocation.center.lat],
-        zoom: 13
+        zoom: CONSTANTS.MAP.DEFAULT_ZOOM
       });
 
       // Add enhanced map controls
@@ -100,12 +198,16 @@ class TrafficIncidentsApp {
 
       // Wait for map to load completely before adding traffic layers
       this.map.on('load', () => {
-        console.log('Map load event fired');
-        this.addTrafficLayers();
+        if (!this.isDestroyed) {
+          console.log('Map load event fired');
+          this.addTrafficLayers();
+        }
       });
 
       // Also try after a delay as a backup
       setTimeout(() => {
+        if (this.isDestroyed) return;
+        
         if (this.map && this.map.isStyleLoaded()) {
           console.log('Backup timer: checking for traffic layers...');
           const hasFlowLayer = this.map.getLayer('traffic-flow') || this.map.getLayer('simple-traffic');
@@ -116,7 +218,7 @@ class TrafficIncidentsApp {
             this.addTrafficLayers();
           }
         }
-      }, 3000);
+      }, CONSTANTS.TIMEOUTS.TRAFFIC_LAYER_RETRY);
 
       this.updateStatus('Map initialized successfully', 'success');
     } catch (error) {
@@ -128,13 +230,15 @@ class TrafficIncidentsApp {
 
   addTrafficLayers() {
     try {
+      if (this.isDestroyed) return;
+      
       console.log('Adding traffic layers...');
       
       // Check if map is loaded
       if (!this.map.isStyleLoaded()) {
         console.log('Map style not loaded yet, waiting...');
         this.map.on('styledata', () => {
-          if (this.map.isStyleLoaded()) {
+          if (this.map.isStyleLoaded() && !this.isDestroyed) {
             this.addTrafficLayers();
           }
         });
@@ -151,7 +255,7 @@ class TrafficIncidentsApp {
         this.map.addSource('traffic-flow', {
           'type': 'raster',
           'tiles': [trafficFlowUrl],
-          'tileSize': 256,
+          'tileSize': CONSTANTS.API.TILE_SIZE,
           'attribution': 'Traffic data © TomTom'
         });
 
@@ -160,7 +264,7 @@ class TrafficIncidentsApp {
           'type': 'raster',
           'source': 'traffic-flow',
           'paint': {
-            'raster-opacity': 0.6
+            'raster-opacity': CONSTANTS.MAP.RASTER_OPACITY.TRAFFIC_FLOW
           }
         });
         console.log('Traffic flow layer added');
@@ -172,7 +276,7 @@ class TrafficIncidentsApp {
         this.map.addSource('traffic-incidents-tiles', {
           'type': 'raster',
           'tiles': [trafficIncidentsUrl],
-          'tileSize': 256,
+          'tileSize': CONSTANTS.API.TILE_SIZE,
           'attribution': 'Incident data © TomTom'
         });
 
@@ -181,7 +285,7 @@ class TrafficIncidentsApp {
           'type': 'raster',
           'source': 'traffic-incidents-tiles',
           'paint': {
-            'raster-opacity': 0.7
+            'raster-opacity': CONSTANTS.MAP.RASTER_OPACITY.TRAFFIC_INCIDENTS
           }
         });
         console.log('Traffic incidents layer added');
@@ -191,10 +295,11 @@ class TrafficIncidentsApp {
       
       // Verify layers exist
       setTimeout(() => {
+        if (this.isDestroyed) return;
         const flowLayer = this.map.getLayer('traffic-flow');
         const incidentsLayer = this.map.getLayer('traffic-incidents-tiles');
         console.log('Layer verification - Flow layer:', !!flowLayer, 'Incidents layer:', !!incidentsLayer);
-      }, 1000);
+      }, CONSTANTS.TIMEOUTS.LAYER_VERIFICATION);
       
     } catch (error) {
       console.error('Error adding traffic layers:', error);
@@ -205,6 +310,8 @@ class TrafficIncidentsApp {
 
   addSimpleTrafficLayer() {
     try {
+      if (this.isDestroyed) return;
+      
       console.log('Trying simple traffic layer approach...');
       
       // Just add a simple traffic flow layer as a test
@@ -212,7 +319,7 @@ class TrafficIncidentsApp {
         this.map.addSource('simple-traffic', {
           'type': 'raster',
           'tiles': [`https://api.tomtom.com/traffic/map/4/tile/flow/relative/{z}/{x}/{y}.png?key=${CONFIG.tomtomApiKey}`],
-          'tileSize': 256
+          'tileSize': CONSTANTS.API.TILE_SIZE
         });
 
         this.map.addLayer({
@@ -220,7 +327,7 @@ class TrafficIncidentsApp {
           'type': 'raster',
           'source': 'simple-traffic',
           'paint': {
-            'raster-opacity': 0.5
+            'raster-opacity': CONSTANTS.MAP.RASTER_OPACITY.SIMPLE_TRAFFIC
           }
         });
         
@@ -234,16 +341,23 @@ class TrafficIncidentsApp {
   async handleLocationSearch() {
     const searchInput = document.getElementById('location-search');
     const searchBtn = document.getElementById('search-btn');
-    const query = searchInput.value.trim();
+    
+    if (!searchInput) {
+      console.error('Search input element not found');
+      return;
+    }
+    
+    const rawQuery = searchInput.value;
+    const query = utils.sanitizeSearchInput(rawQuery);
 
-    if (!query) {
-      alert('Please enter a location to search');
+    if (!query || query.length < 2) {
+      this.updateStatus('Please enter a valid location (at least 2 characters)', 'error');
       return;
     }
 
     try {
       this.updateStatus('Searching for location...', 'loading');
-      searchBtn.disabled = true;
+      if (searchBtn) searchBtn.disabled = true;
 
       // Use TomTom Geocoding API to find the location
       const location = await this.geocodeLocation(query);
@@ -259,19 +373,21 @@ class TrafficIncidentsApp {
       this.updateCurrentLocationDisplay(location.name);
       
       // Move map to new location
-      this.map.setCenter([location.center.lon, location.center.lat]);
-      this.map.setZoom(13);
+      if (this.map) {
+        this.map.setCenter([location.center.lon, location.center.lat]);
+        this.map.setZoom(CONSTANTS.MAP.DEFAULT_ZOOM);
+      }
       
       // Load incidents for new location
       await this.loadTrafficIncidents();
       
-      this.updateStatus(`Switched to ${location.name}`, 'success');
+      this.updateStatus(`Switched to ${utils.sanitizeHtml(location.name)}`, 'success');
 
     } catch (error) {
       console.error('Error searching location:', error);
       this.updateStatus(`Search error: ${error.message}`, 'error');
     } finally {
-      searchBtn.disabled = false;
+      if (searchBtn) searchBtn.disabled = false;
     }
   }
 
@@ -280,20 +396,23 @@ class TrafficIncidentsApp {
       throw new Error('TomTom API key required for search');
     }
 
-    const url = `https://api.tomtom.com/search/2/geocode/${encodeURIComponent(query)}.json?key=${CONFIG.tomtomApiKey}&limit=1`;
+    // Additional sanitization for URL encoding
+    const sanitizedQuery = encodeURIComponent(utils.sanitizeSearchInput(query));
+    const url = `https://api.tomtom.com/search/2/geocode/${sanitizedQuery}.json?key=${CONFIG.tomtomApiKey}&limit=${CONSTANTS.API.GEOCODING_LIMIT}`;
     
     console.log('Geocoding location:', query);
     
     const response = await fetch(url);
     
     if (!response.ok) {
-      throw new Error(`Geocoding failed: ${response.status}`);
+      const errorText = await response.text().catch(() => 'Unknown error');
+      throw new Error(`Geocoding failed: ${response.status} - ${errorText}`);
     }
 
     const data = await response.json();
     console.log('Geocoding response:', data);
 
-    if (!data.results || data.results.length === 0) {
+    if (!data.results || !Array.isArray(data.results) || data.results.length === 0) {
       return null;
     }
 
@@ -301,11 +420,16 @@ class TrafficIncidentsApp {
     const position = result.position;
     const address = result.address;
     
+    // Validate the response data
+    if (!position || !utils.isValidCoordinate(position.lon, position.lat)) {
+      throw new Error('Invalid coordinates received from geocoding service');
+    }
+    
     // Create bounding box around the location (approximately 5km radius)
-    const radius = 0.045; // Roughly 5km in degrees
+    const radius = CONSTANTS.MAP.SEARCH_RADIUS;
     
     return {
-      name: address.freeformAddress || query,
+      name: address?.freeformAddress || query,
       center: { lat: position.lat, lon: position.lon },
       bbox: {
         minLat: position.lat - radius,
@@ -531,7 +655,12 @@ class TrafficIncidentsApp {
     
     const formatTime = (timestamp) => {
       if (!timestamp) return 'Unknown';
-      return new Date(timestamp).toLocaleString();
+      try {
+        return new Date(timestamp).toLocaleString();
+      } catch (error) {
+        console.warn('Invalid timestamp:', timestamp);
+        return 'Invalid time';
+      }
     };
 
     // Safely format coordinates
@@ -544,18 +673,24 @@ class TrafficIncidentsApp {
       return `Lat: ${lat}, Lon: ${lon}`;
     };
 
+    // Sanitize all user-facing content
+    const safeType = utils.sanitizeHtml(incident.type || 'Unknown');
+    const safeDescription = utils.sanitizeHtml(incident.description || 'No description available');
+    const safeLocation = utils.sanitizeHtml(formatCoords(incident.location));
+    const safeTime = utils.sanitizeHtml(formatTime(incident.startTime));
+
     card.innerHTML = `
-      <div class="incident-type">${incident.type}</div>
-      <div class="incident-description">${incident.description}</div>
-      <div class="incident-location">📍 ${formatCoords(incident.location)}</div>
-      <div class="incident-time">⏰ Started: ${formatTime(incident.startTime)}</div>
+      <div class="incident-type">${safeType}</div>
+      <div class="incident-description">${safeDescription}</div>
+      <div class="incident-location">📍 ${safeLocation}</div>
+      <div class="incident-time">⏰ Started: ${safeTime}</div>
     `;
 
     return card;
   }
 
   addMarkersToMap() {
-    if (!this.map) return;
+    if (!this.map || this.isDestroyed) return;
 
     this.incidents.forEach(incident => {
       // Validate coordinates before adding marker
@@ -565,7 +700,7 @@ class TrafficIncidentsApp {
       }
 
       const [lon, lat] = incident.location;
-      if (typeof lon !== 'number' || typeof lat !== 'number') {
+      if (!utils.isValidCoordinate(lon, lat)) {
         console.warn('Invalid coordinate values for incident:', incident);
         return;
       }
@@ -577,12 +712,17 @@ class TrafficIncidentsApp {
         .setLngLat([lon, lat])
         .addTo(this.map);
 
+        // Sanitize popup content to prevent XSS
+        const safeType = utils.sanitizeHtml(incident.type || 'Unknown');
+        const safeDescription = utils.sanitizeHtml(incident.description || 'No description available');
+        const safeSeverity = utils.sanitizeHtml(incident.severity || 'unknown');
+
         // Add popup with incident details
         const popup = new tt.Popup({ offset: 25 }).setHTML(`
           <div style="font-family: Arial, sans-serif;">
-            <h3 style="margin: 0 0 10px 0; color: #333;">${incident.type}</h3>
-            <p style="margin: 0 0 5px 0; font-size: 14px;">${incident.description}</p>
-            <p style="margin: 0; font-size: 12px; color: #666;">Severity: ${incident.severity}</p>
+            <h3 style="margin: 0 0 10px 0; color: #333;">${safeType}</h3>
+            <p style="margin: 0 0 5px 0; font-size: 14px;">${safeDescription}</p>
+            <p style="margin: 0; font-size: 12px; color: #666;">Severity: ${safeSeverity}</p>
           </div>
         `);
 
