@@ -1,0 +1,20 @@
+name: Deploy to GitHub Pages
+on:
+  push:
+    branches: [main]
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+      - run: npm install
+      - run: echo "VITE_TOMTOM_API_KEY=${{ secrets.TOMTOM_API_KEY }}" >> .env
+      - run: npm run build
+      - run: git config --global user.email "github-actions[bot]@users.noreply.github.com" 
+      - run: git config --global user.name "github-actions[bot]"
+      - run: npx gh-pages -d dist
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

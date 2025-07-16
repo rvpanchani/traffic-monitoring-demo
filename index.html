@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/traffic-monitoring-demo/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sinhgad Road Traffic Incidents</title>
+    <!-- TomTom Maps SDK -->
+    <link rel="stylesheet" type="text/css" href="https://api.tomtom.com/maps-sdk-for-web/cdn/6.x/6.25.0/maps/maps.css">
+    <script src="https://api.tomtom.com/maps-sdk-for-web/cdn/6.x/6.25.0/maps/maps-web.min.js"></script>
+    <script type="module" crossorigin src="/traffic-monitoring-demo/assets/index-BVC2pksj.js"></script>
+    <link rel="stylesheet" crossorigin href="/traffic-monitoring-demo/assets/index-lQba9mXk.css">
+  </head>
+  <body>
+    <div id="app">
+      <header class="header">
+        <h1>Traffic Incidents Monitor</h1>
+        <p>Live traffic incidents with location search</p>
+        
+        <!-- Search Section -->
+        <div class="search-section">
+          <div class="search-container">
+            <input 
+              type="text" 
+              id="location-search" 
+              placeholder="Search for any location (e.g., Mumbai, Delhi, Bangalore...)"
+              class="search-input"
+            />
+            <button id="search-btn" class="search-btn">Search</button>
+          </div>
+          <div class="current-location" id="current-location">
+            📍 Currently viewing: Sinhgad Road, Pune
+          </div>
+        </div>
+      </header>
+      
+      <main class="main-content">
+        <div class="controls">
+          <div class="control-group">
+            <button id="refresh-btn" class="refresh-btn">Refresh Data</button>
+            <div class="traffic-controls">
+              <button id="toggle-traffic-flow" class="traffic-btn active">Traffic Flow</button>
+              <button id="toggle-traffic-incidents" class="traffic-btn active">Traffic Incidents</button>
+            </div>
+          </div>
+          <div class="status" id="status">Loading...</div>
+        </div>
+        
+        <div class="content-grid">
+          <div class="map-container">
+            <div id="map" class="map"></div>
+          </div>
+          
+          <div class="incidents-panel">
+            <h2>Current Incidents</h2>
+            
+            <!-- Traffic Legend -->
+            <div class="traffic-legend">
+              <h3>Live Traffic Legend</h3>
+              <div class="legend-items">
+                <div class="legend-item">
+                  <span class="legend-color" style="background: #22c55e;"></span>
+                  <span>Free Flow</span>
+                </div>
+                <div class="legend-item">
+                  <span class="legend-color" style="background: #eab308;"></span>
+                  <span>Moderate Traffic</span>
+                </div>
+                <div class="legend-item">
+                  <span class="legend-color" style="background: #f97316;"></span>
+                  <span>Heavy Traffic</span>
+                </div>
+                <div class="legend-item">
+                  <span class="legend-color" style="background: #ef4444;"></span>
+                  <span>Very Heavy Traffic</span>
+                </div>
+              </div>
+            </div>
+            
+            <div id="incidents-list" class="incidents-list">
+              <!-- Incidents will be populated here -->
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>
